@@ -407,7 +407,7 @@ const clr=e=>{const r=e.target.closest('.row,.blk');if(r)r.classList.remove('bad
 fm.addEventListener('input',clr);fm.addEventListener('change',clr);
 
 function openForm(){
- if(formOpen||busy)return;formOpen=true;
+ if(formOpen||busy)return;formOpen=true;askGravity();
  title0.style.transition='opacity .25s';title0.style.opacity=0;apply.classList.add('hide');
  sheet.classList.add('on');goAge(ageI);setTimeout(()=>sheet.focus({preventScroll:true}),450);
 }
@@ -442,7 +442,7 @@ function submitNow(data){
  const sendP=net
   ?fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({'form-name':CONFIG.NETLIFY_FORM,name:data.name,age:data.age,gender:data.gender,city:data.city,district:data.district,skills:data.skills.join(', '),phone:data.phone}).toString()})
-   .then(r=>r.ok?'ok':'fail',()=>'fail')
+   .then(r=>{if(!r.ok)console.warn('[지원서] 전송 실패',r.status,r.url);return r.ok?'ok':'fail'},e=>{console.warn('[지원서] 네트워크 오류',e);return'fail'})
   :CONFIG.SUBMIT_URL
   ?fetch(CONFIG.SUBMIT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(data)}).then(()=>'ok',()=>'fail')
   :(console.log('[지원서]',data),Promise.resolve('ok'));
@@ -454,7 +454,7 @@ function endScreen(){
  if(!outroDone)return;
  dm.textContent=sendState==='pending'?'전송 중…':sendState==='ok'?'지원서가 전달됐어요':'전송에 실패했어요';
  rt.hidden=sendState!=='fail';doneEl.hidden=false;
- if(sendState==='ok'){title0.style.transition='opacity .6s';title0.style.opacity=1}
+ if(sendState==='ok'){title0.style.transition='opacity .6s';title0.style.opacity=1;finalGravity()}
 }
 rt.addEventListener('click',()=>{doneEl.hidden=true;outroDone=false;busy=false;sheet.style.visibility='';sheet.classList.remove('writing');sheet.focus({preventScroll:true})});
 
@@ -564,6 +564,48 @@ function endOutro(){
  outroDone=true;endScreen();
 }
 
+/* ===== 중력 센서: 폰을 기울이면 졸라맨이 미끄러지고 벽에서 튕김 ===== */
+const GR={tilt:0,has:false,on:false,asked:false,x:null,vx:0,mir:1,last:0,p0:0,bt:-9,off:0,final:false};
+function onTilt(e){
+ if(e.gamma==null&&e.beta==null)return;
+ const a=(screen.orientation&&screen.orientation.angle)||0;
+ const v=a===90?e.beta:a===270?-e.beta:a===180?-e.gamma:e.gamma;
+ if(v==null||isNaN(v))return;
+ GR.has=true;GR.tilt=lp(GR.tilt,cl(v,-60,60),.35);
+}
+function startGrav(){if(GR.on||!window.DeviceOrientationEvent)return;GR.on=true;addEventListener('deviceorientation',onTilt)}
+function askGravity(){ // iPhone은 버튼을 누르는 순간에만 허용 요청 가능
+ if(GR.asked)return;GR.asked=true;
+ const D=window.DeviceOrientationEvent;if(!D)return;
+ if(typeof D.requestPermission==='function')D.requestPermission().then(r=>{if(r==='granted')startGrav()},()=>{});
+}
+if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission!=='function')startGrav();
+function gravApply(now,st){
+ const K=k*st.s,dt=Math.min(.05,(now-(GR.last||now))/1000);GR.last=now;
+ if(GR.x==null)GR.x=st.gx;
+ const m=26*K,dz=Math.sign(GR.tilt)*Math.max(0,Math.abs(GR.tilt)-2);
+ GR.vx+=Math.sin(dz*rad)*W*3.4*dt;GR.vx*=Math.max(0,1-1.2*dt);GR.x+=GR.vx*dt;
+ let hit=false;
+ if(GR.x<m){GR.x=m;hit=GR.vx<-60;GR.vx=hit?-GR.vx*.55:0}
+ else if(GR.x>W-m){GR.x=W-m;hit=GR.vx>60;GR.vx=hit?-GR.vx*.55:0}
+ const t=now/1000;if(hit)GR.bt=t;
+ const r=cl(Math.abs(GR.vx)/(W*.8));if(Math.abs(GR.vx)>20)GR.mir=GR.vx>0?1:-1;
+ const p=st.p.slice(),sw=Math.sin(t*16);
+ p[0]+=24*r;p[1]=lp(p[1],-110+14*sw,r);p[2]=lp(p[2],-150,r);p[3]=lp(p[3],110-14*sw,r);p[4]=lp(p[4],150,r);p[5]=lp(p[5],-30,r);p[7]=lp(p[7],30,r);
+ const bd=t-GR.bt;if(bd<.3){st.air=-9*Math.sin(PI*bd/.3);st.fx='bang';p[0]-=18*(1-bd/.3)}
+ st.p=p;st.gx=GR.x;st.mir=GR.mir;GR.p0=p[0];return st;
+}
+function finalGravity(){ // 제출 후 마지막 화면: 졸라맨이 다시 나와 기울기에 반응
+ if(GR.final||!GR.has||RM)return;GR.final=true;
+ const K=H*.18/93,s=K/k;GR.x=W/2;GR.vx=0;GR.last=0;
+ hero.style.display='';hero.style.opacity=0;hero.style.transition='opacity .6s';requestAnimationFrame(()=>hero.style.opacity=1);
+ const loop=now=>{
+  const t=now/1000,b=Math.sin(t*2.2),p=P.stand.slice();p[0]=1.2*b;
+  const st=gravApply(now,{p,gx:W/2,gy:H*.9,s,mir:1,air:0,hb:0,fx:'',fu:0});
+  const o=draw(st,{p:[GR.p0],air:0});fxp.setAttribute('d',fxs(st,t,o));requestAnimationFrame(loop)};
+ requestAnimationFrame(loop);
+}
+
 /* 실행 */
 let t0=0,started=false,done=false;
 function finish(){
@@ -576,6 +618,7 @@ function finish(){
 }
 function start(){
  if(started)return;started=true;go.classList.add('p');go.disabled=true;
+ GR.off=GR.has&&GR.x!=null?GR.x-X0:0;askGravity();
  setTimeout(()=>{go.classList.remove('p');go.classList.add('out')},140);
  if(RM){hero.style.transition='opacity .5s';hero.style.opacity=0;title0.style.transition='opacity .6s';title0.style.opacity=1;
   panel.style.transition='none';panel.style.transform='translateX(0)';title0.removeAttribute('transform');
@@ -587,7 +630,10 @@ function frame(now){
  const live=started&&!RM;let t=0;
  if(live){t=(now-t0)/1000*CONFIG.SPEED;if(t>=T.end){finish();return}}
  if(!started)title0.setAttribute('transform','translate(-99999 0)');
- const n=now/1000,st=live?S(t):idle(n),lag=live?S(Math.max(0,t-.09)):idle(n-.09),o=draw(st,lag);
+ const n=now/1000;let st=live?S(t):idle(n),lag=live?S(Math.max(0,t-.09)):idle(n-.09);
+ if(!started&&GR.on&&GR.has){st=gravApply(now,st);lag={p:[GR.p0],air:0}}
+ else if(live&&GR.off&&t<.6)st.gx+=GR.off*(1-eio(sg(t,0,.5)));
+ const o=draw(st,lag);
  fxp.setAttribute('d',live?fxs(st,t,o):'');
  if(live){pan(t,o);shake(t);btn(t,st,o)}
  requestAnimationFrame(frame);
